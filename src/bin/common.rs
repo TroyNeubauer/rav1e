@@ -255,6 +255,18 @@ pub struct CliOptions {
 
   #[clap(subcommand)]
   pub command: Option<Commands>,
+
+  #[clap(long, help = "Add hidden information into the video")]
+  pub hidden_string: Option<String>,
+
+  #[clap(long, help = "Padding between hidden bits")]
+  pub hidden_bits_padding: Option<usize>,
+
+  #[clap(
+    long,
+    help = "Offset between the first injection-suitable bit and the first hidden bit"
+  )]
+  pub hidden_bits_offset: Option<usize>,
 }
 
 static VERSION_STR: OnceLock<String> = OnceLock::new();
@@ -329,6 +341,12 @@ pub enum Verboseness {
   Verbose,
 }
 
+pub struct HiddenInformationConfig {
+  pub string: String,
+  pub padding: Option<usize>,
+  pub offset: Option<usize>,
+}
+
 pub struct ParsedCliOptions {
   pub io: EncoderIO,
   pub enc: EncoderConfig,
@@ -347,6 +365,7 @@ pub struct ParsedCliOptions {
   #[cfg(feature = "unstable")]
   pub slots: usize,
   pub force_highbitdepth: bool,
+  pub hidden_information_config: Option<HiddenInformationConfig>,
 }
 
 #[cfg(feature = "serialize")]
@@ -473,6 +492,24 @@ pub fn parse_cli() -> Result<ParsedCliOptions, CliError> {
     panic!("A limit cannot be set above 1 in still picture mode");
   }
 
+  let hidden_information_config = match matches.hidden_string {
+    Some(string) => {
+      let padding = matches
+        .hidden_bits_padding
+        .expect("Hidden bits padding must be specified when hiding a string");
+      let offset = matches
+        .hidden_bits_offset
+        .expect("Hidden bits offset must be specified when hiding a string");
+
+      Some(HiddenInformationConfig {
+        string,
+        padding: Some(padding),
+        offset: Some(offset),
+      })
+    }
+    None => None,
+  };
+
   #[cfg(feature = "unstable")]
   let slots = matches.slots;
 
@@ -494,6 +531,7 @@ pub fn parse_cli() -> Result<ParsedCliOptions, CliError> {
     force_highbitdepth: matches.high_bitdepth,
     #[cfg(feature = "unstable")]
     slots,
+    hidden_information_config,
   })
 }
 

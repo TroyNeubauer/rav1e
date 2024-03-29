@@ -32,6 +32,7 @@ use crate::rdo::*;
 use crate::segmentation::*;
 use crate::serialize::{Deserialize, Serialize};
 use crate::stats::EncoderStats;
+use crate::steg::HiddenInformationContainer;
 use crate::tiling::*;
 use crate::transform::*;
 use crate::util::*;
@@ -40,7 +41,6 @@ use crate::wasm_bindgen::*;
 use arg_enum_proc_macro::ArgEnum;
 use arrayvec::*;
 use bitstream_io::{BigEndian, BitWrite, BitWriter};
-use rayon::iter::*;
 
 use std::collections::VecDeque;
 use std::io::Write;
@@ -2606,6 +2606,9 @@ pub fn encode_block_with_modes<T: Pixel, W: Writer>(
     tile_bo,
     skip,
   );
+
+  cw.hidden_info_container.start_pre_encoding();
+
   encode_block_post_cdef(
     fi,
     ts,
@@ -2628,6 +2631,8 @@ pub fn encode_block_with_modes<T: Pixel, W: Writer>(
     true,
     enc_stats,
   );
+
+  cw.hidden_info_container.stop_pre_encoding();
 }
 
 #[profiling::function]
@@ -3115,6 +3120,9 @@ fn encode_partition_topdown<T: Pixel, W: Writer>(
       }
 
       // FIXME: every final block that has gone through the RDO decision process is encoded twice
+
+      cw.hidden_info_container.start_pre_encoding();
+
       cdef_coded = encode_block_pre_cdef(
         &fi.sequence,
         ts,
@@ -3124,6 +3132,10 @@ fn encode_partition_topdown<T: Pixel, W: Writer>(
         tile_bo,
         skip,
       );
+
+      cw.hidden_info_container.stop_pre_encoding();
+      cw.hidden_info_container.start_final_encoding();
+
       encode_block_post_cdef(
         fi,
         ts,
@@ -3146,6 +3158,8 @@ fn encode_partition_topdown<T: Pixel, W: Writer>(
         true,
         Some(enc_stats),
       );
+
+      cw.hidden_info_container.stop_final_encoding();
     }
     PARTITION_SPLIT | PARTITION_HORZ | PARTITION_VERT => {
       if !rdo_output.part_modes.is_empty() {
@@ -3236,6 +3250,7 @@ fn get_initial_cdfcontext<T: Pixel>(fi: &FrameInvariants<T>) -> CDFContext {
 #[profiling::function]
 fn encode_tile_group<T: Pixel>(
   fi: &FrameInvariants<T>, fs: &mut FrameState<T>, inter_cfg: &InterConfig,
+  hic: &mut HiddenInformationContainer,
 ) -> Vec<u8> {
   let planes =
     if fi.sequence.chroma_sampling == ChromaSampling::Cs400 { 1 } else { 3 };
@@ -3250,9 +3265,10 @@ fn encode_tile_group<T: Pixel>(
     .tile_iter_mut(fs, &mut blocks)
     .zip(cdfs.iter_mut())
     .collect::<Vec<_>>()
-    .into_par_iter()
+    .into_iter()
+    //.into_par_iter()
     .map(|(mut ctx, cdf)| {
-      encode_tile(fi, &mut ctx.ts, cdf, &mut ctx.tb, inter_cfg)
+      encode_tile(fi, &mut ctx.ts, cdf, &mut ctx.tb, inter_cfg, hic)
     })
     .unzip();
 
@@ -3468,7 +3484,7 @@ fn check_lf_queue<T: Pixel>(
 fn encode_tile<'a, T: Pixel>(
   fi: &FrameInvariants<T>, ts: &'a mut TileStateMut<'_, T>,
   fc: &'a mut CDFContext, blocks: &'a mut TileBlocksMut<'a>,
-  inter_cfg: &InterConfig,
+  inter_cfg: &InterConfig, hic: &'a mut HiddenInformationContainer,
 ) -> (Vec<u8>, EncoderStats) {
   let mut enc_stats = EncoderStats::default();
   let mut w = WriterEncoder::new();
@@ -3476,7 +3492,7 @@ fn encode_tile<'a, T: Pixel>(
     if fi.sequence.chroma_sampling == ChromaSampling::Cs400 { 1 } else { 3 };
 
   let bc = BlockContext::new(blocks);
-  let mut cw = ContextWriter::new(fc, bc);
+  let mut cw = ContextWriter::new(fc, bc, hic);
   let mut sbs_q: VecDeque<SBSQueueEntry> = VecDeque::new();
   let mut last_lru_ready = [-1; 3];
   let mut last_lru_rdoed = [-1; 3];
@@ -3508,9 +3524,10 @@ fn encode_tile<'a, T: Pixel>(
         tile_bo.0.y + BlockSize::BLOCK_64X64.height_mi() > ts.mi_height;
 
       // Encode SuperBlock
-      if fi.config.speed_settings.partition.encode_bottomup
-        || is_straddle_sbx
-        || is_straddle_sby
+      if cw.hidden_info_container.is_done()
+        && (fi.config.speed_settings.partition.encode_bottomup
+          || is_straddle_sbx
+          || is_straddle_sby)
       {
         encode_partition_bottomup(
           fi,
@@ -3767,6 +3784,7 @@ fn get_initial_segmentation<T: Pixel>(
 #[profiling::function]
 pub fn encode_frame<T: Pixel>(
   fi: &FrameInvariants<T>, fs: &mut FrameState<T>, inter_cfg: &InterConfig,
+  hic: &mut HiddenInformationContainer,
 ) -> Vec<u8> {
   debug_assert!(!fi.is_show_existing_frame());
   let obu_extension = 0;
@@ -3777,7 +3795,7 @@ pub fn encode_frame<T: Pixel>(
     fs.segmentation = get_initial_segmentation(fi);
     segmentation_optimize(fi, fs);
   }
-  let tile_group = encode_tile_group(fi, fs, inter_cfg);
+  let tile_group = encode_tile_group(fi, fs, inter_cfg, hic);
 
   if fi.frame_type == FrameType::KEY {
     write_key_frame_obus(&mut packet, fi, obu_extension).unwrap();

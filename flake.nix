@@ -15,7 +15,6 @@
         rust = pkgs.rust-bin.stable.latest.default.override {
           extensions = [ "rust-src" "rust-analyzer" ];
         };
-        oskd = import ./package.nix { pkgs = pkgs; };
       in {
         devShells.default = pkgs.mkShell {
           buildInputs = with pkgs; [

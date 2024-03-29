@@ -190,6 +190,8 @@ mod api;
 mod frame;
 mod header;
 
+pub mod steg;
+
 use crate::encoder::*;
 
 pub use crate::api::{

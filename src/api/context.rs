@@ -26,14 +26,14 @@ use std::sync::Arc;
 /// The encoder context.
 ///
 /// Contains the encoding state.
-pub struct Context<T: Pixel> {
-  pub(crate) inner: ContextInner<T>,
+pub struct Context<'a, T: Pixel> {
+  pub(crate) inner: ContextInner<'a, T>,
   pub(crate) config: EncoderConfig,
   pub(crate) pool: Option<Arc<rayon::ThreadPool>>,
   pub(crate) is_flushing: bool,
 }
 
-impl<T: Pixel> Context<T> {
+impl<'a, T: Pixel> Context<'a, T> {
   /// Allocates and returns a new frame.
   ///
   /// # Examples
@@ -389,7 +389,7 @@ pub enum RcData {
   Frame(Box<[u8]>),
 }
 
-impl<T: Pixel> Context<T> {
+impl<'a, T: Pixel> Context<'a, T> {
   /// Return the Rate Control Summary Packet size
   ///
   /// It is useful mainly to preserve space when saving
@@ -456,7 +456,7 @@ impl<T: Pixel> Context<T> {
   }
 }
 
-impl<T: Pixel> fmt::Debug for Context<T> {
+impl<T: Pixel> fmt::Debug for Context<'_, T> {
   fn fmt(
     &self, f: &mut fmt::Formatter<'_>,
   ) -> std::result::Result<(), fmt::Error> {

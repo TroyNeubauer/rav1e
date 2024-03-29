@@ -25,6 +25,7 @@ use crate::rate::{
 };
 use crate::scenechange::SceneChangeDetector;
 use crate::stats::EncoderStats;
+use crate::steg::HiddenInformationContainer;
 use crate::tiling::Area;
 use crate::util::Pixel;
 use arrayvec::ArrayVec;
@@ -223,7 +224,7 @@ type FrameQueue<T> = BTreeMap<u64, Option<Arc<Frame<T>>>>;
 type FrameDataQueue<T> = BTreeMap<u64, Option<FrameData<T>>>;
 
 // the fields pub(super) are accessed only by the tests
-pub(crate) struct ContextInner<T: Pixel> {
+pub(crate) struct ContextInner<'a, T: Pixel> {
   pub(crate) frame_count: u64,
   pub(crate) limit: Option<u64>,
   pub(crate) output_frameno: u64,
@@ -259,10 +260,14 @@ pub(crate) struct ContextInner<T: Pixel> {
   opaque_q: BTreeMap<u64, Opaque>,
   /// Optional T35 metadata per frame
   t35_q: BTreeMap<u64, Box<[T35]>>,
+
+  pub(crate) hic: &'a mut HiddenInformationContainer,
 }
 
-impl<T: Pixel> ContextInner<T> {
-  pub fn new(enc: &EncoderConfig) -> Self {
+impl<'a, T: Pixel> ContextInner<'a, T> {
+  pub fn new(
+    enc: &EncoderConfig, hic: &'a mut HiddenInformationContainer,
+  ) -> Self {
     // initialize with temporal delimiter
     let packet_data = TEMPORAL_DELIMITER.to_vec();
     let mut keyframes = BTreeSet::new();
@@ -312,6 +317,7 @@ impl<T: Pixel> ContextInner<T> {
       next_lookahead_output_frameno: 0,
       opaque_q: BTreeMap::new(),
       t35_q: BTreeMap::new(),
+      hic,
     }
   }
 
@@ -1374,7 +1380,8 @@ impl<T: Pixel> ContextInner<T> {
 
     if self.rc_state.needs_trial_encode(fti) {
       let mut trial_fs = frame_data.fs.clone();
-      let data = encode_frame(&frame_data.fi, &mut trial_fs, &self.inter_cfg);
+      let data =
+        encode_frame(&frame_data.fi, &mut trial_fs, &self.inter_cfg, self.hic);
       self.rc_state.update_state(
         (data.len() * 8) as i64,
         fti,
@@ -1393,8 +1400,12 @@ impl<T: Pixel> ContextInner<T> {
       frame_data.fi.set_quantizers(&qps);
     }
 
-    let data =
-      encode_frame(&frame_data.fi, &mut frame_data.fs, &self.inter_cfg);
+    let data = encode_frame(
+      &frame_data.fi,
+      &mut frame_data.fs,
+      &self.inter_cfg,
+      self.hic,
+    );
     #[cfg(feature = "dump_lookahead_data")]
     {
       let input_frameno = frame_data.fi.input_frameno;

@@ -13,6 +13,7 @@ use rayon::{ThreadPool, ThreadPoolBuilder};
 use std::sync::Arc;
 
 use crate::api::{ChromaSampling, Context, ContextInner, PixelRange};
+use crate::steg::HiddenInformationContainer;
 use crate::util::Pixel;
 
 mod encoder;
@@ -212,9 +213,9 @@ fn check_tile_log2(n: usize) -> bool {
 }
 
 impl Config {
-  pub(crate) fn new_inner<T: Pixel>(
-    &self,
-  ) -> Result<ContextInner<T>, InvalidConfig> {
+  pub(crate) fn new_inner<'a, T: Pixel>(
+    &self, hic: &'a mut HiddenInformationContainer,
+  ) -> Result<ContextInner<'a, T>, InvalidConfig> {
     assert!(
       8 * std::mem::size_of::<T>() >= self.enc.bit_depth,
       "The Pixel u{} does not match the Config bit_depth {}",
@@ -238,7 +239,7 @@ impl Config {
       config.speed_settings.transform.rdo_tx_decision = false;
     }
 
-    let mut inner = ContextInner::new(&config);
+    let mut inner = ContextInner::new(&config, hic);
 
     if let Some(ref s) = self.rate_control.summary {
       inner.rc_state.init_second_pass();
@@ -289,8 +290,10 @@ impl Config {
   /// ```
   ///
   /// [`Context`]: struct.Context.html
-  pub fn new_context<T: Pixel>(&self) -> Result<Context<T>, InvalidConfig> {
-    let inner = self.new_inner()?;
+  pub fn new_context<'a, T: Pixel>(
+    &self, hic: &'a mut HiddenInformationContainer,
+  ) -> Result<Context<'a, T>, InvalidConfig> {
+    let inner = self.new_inner(hic)?;
     let config = (*inner.config).clone();
     let pool = self.new_thread_pool();
 

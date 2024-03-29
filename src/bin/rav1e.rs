@@ -97,6 +97,7 @@ use crate::error::*;
 use crate::stats::*;
 use rav1e::config::CpuFeatureLevel;
 use rav1e::prelude::*;
+use rav1e::steg::HiddenInformationContainer;
 
 use crate::decoder::{Decoder, FrameBuilder, VideoDetails};
 use crate::muxer::*;
@@ -105,7 +106,7 @@ use std::io::{Read, Seek, Write};
 use std::process::exit;
 use std::sync::Arc;
 
-impl<T: Pixel> FrameBuilder<T> for Context<T> {
+impl<T: Pixel> FrameBuilder<T> for Context<'_, T> {
   fn new_frame(&self) -> Frame<T> {
     Context::new_frame(self)
   }
@@ -296,9 +297,11 @@ fn do_encode<T: Pixel, D: Decoder>(
   mut pass2file: Option<File>,
   mut y4m_enc: Option<y4m::Encoder<Box<dyn Write + Send>>>,
   metrics_enabled: MetricsEnabled,
+  mut hidden_information_container: HiddenInformationContainer,
 ) -> Result<(), CliError> {
-  let mut ctx: Context<T> =
-    cfg.new_context().map_err(|e| e.context("Invalid encoder settings"))?;
+  let mut ctx: Context<T> = cfg
+    .new_context(&mut hidden_information_container)
+    .map_err(|e| e.context("Invalid encoder settings"))?;
 
   // Let's write down a placeholder.
   if let Some(passfile) = pass1file.as_mut() {
@@ -625,6 +628,16 @@ fn run() -> Result<(), error::CliError> {
 
   let source = Source::new(cli.limit, y4m_dec);
 
+  let hic: HiddenInformationContainer = match cli.hidden_information_config {
+    None => HiddenInformationContainer::new(vec![], None, None),
+    Some(config) => {
+      let mut data = config.string.into_bytes();
+      data.push(0b0);
+
+      HiddenInformationContainer::new(data, config.padding, config.offset)
+    }
+  };
+
   if video_info.bit_depth == 8 && !cli.force_highbitdepth {
     do_encode::<u8, y4m::Decoder<Box<dyn Read + Send>>>(
       cfg,
@@ -636,6 +649,7 @@ fn run() -> Result<(), error::CliError> {
       pass2file,
       y4m_enc,
       cli.metrics_enabled,
+      hic,
     )?
   } else {
     do_encode::<u16, y4m::Decoder<Box<dyn Read + Send>>>(
@@ -648,6 +662,7 @@ fn run() -> Result<(), error::CliError> {
       pass2file,
       y4m_enc,
       cli.metrics_enabled,
+      hic,
     )?
   }
   if cli.benchmark {

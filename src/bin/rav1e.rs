@@ -296,8 +296,7 @@ fn do_encode<T: Pixel, D: Decoder>(
   output: &mut dyn Muxer, mut source: Source<D>, mut pass1file: Option<File>,
   mut pass2file: Option<File>,
   mut y4m_enc: Option<y4m::Encoder<Box<dyn Write + Send>>>,
-  metrics_enabled: MetricsEnabled,
-  mut hidden_information_container: Hic,
+  metrics_enabled: MetricsEnabled, mut hidden_information_container: Hic,
 ) -> Result<(), CliError> {
   let mut ctx: Context<T> = cfg
     .new_context(&mut hidden_information_container)
@@ -440,7 +439,7 @@ cfg_if::cfg_if! {
 }
 
 fn run() -> Result<(), error::CliError> {
-  let mut cli = parse_cli()?;
+  let mut cli = parse_cli(None)?;
   // Maximum frame size by specification + maximum y4m header
   let limit = y4m::Limits {
     // Use saturating operations to gracefully handle 32-bit architectures
@@ -629,12 +628,12 @@ fn run() -> Result<(), error::CliError> {
   let source = Source::new(cli.limit, y4m_dec);
 
   let hic: Hic = match cli.hidden_information_config {
-    None => Hic::new(vec![], None, None),
+    None => Hic::just_data(vec![], None, None),
     Some(config) => {
       let mut data = config.string.into_bytes();
       data.push(0b0);
 
-      Hic::new(data, config.padding, config.offset)
+      Hic::just_data(data, config.padding, config.offset)
     }
   };
 

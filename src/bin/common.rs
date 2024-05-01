@@ -406,7 +406,9 @@ fn build_speed_long_help() -> Option<&'static str> {
 #[allow(unused_mut)]
 /// Only call this once at the start of the app,
 /// otherwise bad things will happen.
-pub fn parse_cli() -> Result<ParsedCliOptions, CliError> {
+pub fn parse_cli(
+  output_override: Option<Box<dyn std::io::Write + Send>>,
+) -> Result<ParsedCliOptions, CliError> {
   let matches = CliOptions::parse();
 
   let mut save_config_path = None;
@@ -465,7 +467,7 @@ pub fn parse_cli() -> Result<ParsedCliOptions, CliError> {
           .map_err(|e| e.context("Cannot open input file"))?,
       ) as Box<dyn Read + Send>,
     },
-    output: create_muxer(&matches.output, matches.overwrite)?,
+    output: create_muxer(&matches.output, matches.overwrite, output_override)?,
     rec,
   };
 

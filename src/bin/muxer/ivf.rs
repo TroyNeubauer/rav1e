@@ -62,6 +62,10 @@ cfg_if::cfg_if! {
 }
 
 impl IvfMuxer {
+  pub fn new(output: Box<dyn Write + Send>) -> Box<dyn Muxer + Send> {
+    Box::new(Self { output })
+  }
+
   pub fn check_file<P: AsRef<Path>>(path: P) -> Result<(), CliError> {
     if is_file(path.as_ref()) {
       eprint!(

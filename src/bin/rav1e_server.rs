@@ -108,6 +108,7 @@ use crate::muxer::*;
 use std::fs::File;
 use std::io::{Read, Seek, Write};
 use std::net::TcpListener;
+use std::net::TcpStream;
 use std::process::exit;
 use std::sync::mpsc::SyncSender;
 use std::sync::Arc;
@@ -361,10 +362,13 @@ fn do_encode<T: Pixel, D: Decoder>(
 //   b. 0 -> Set param command (used by client to inject their secret)
 //   c. 1 -> Start playback
 //   d. 2 -> Pause playback
-// 2. Encoder send mixture in first 1000 bits, then encrypted payload file
+// 2. Encoder send mixture in first 256 bits, then encrypted payload file
 //    after
 // 3. Decoder (handle decryption)
-//   - part of da1d project (read server mixture, compute secret, then decrypt)
+//   - Have dav1d write raw bit angles to unix socket
+//   - Create wrapper program that connects to fake RTSP server, sends params,
+//     starts dav1d decoder, reads bits, computes shared secret, decripts
+//
 //
 // 1. Client generates diffie helman secret
 // 2. Client initates TCP connection to server
@@ -383,6 +387,7 @@ fn do_encode<T: Pixel, D: Decoder>(
 struct EncryptionData {
   shared_secret: zeroize::Zeroizing<SharedSecret>,
   server_public: PublicKey,
+  socket: TcpStream,
 }
 
 fn start_rtsp_task(
@@ -412,15 +417,14 @@ fn start_rtsp_task(
     let mut client_public = [0u8; 32];
     client_public.copy_from_slice(&param[..32]);
 
-    let client_public = PublicKey::from(client_public);
+    let client_secret = StaticSecret::from([0u8; 32]);
+    let client_public = PublicKey::from(&client_secret);
 
     //let server_secret = EphemeralSecret::random();
     let server_secret = StaticSecret::from([0u8; 32]);
     let server_public = PublicKey::from(&server_secret);
 
     let shared_secret = server_secret.diffie_hellman(&client_public);
-    let data =
-      EncryptionData { shared_secret: shared_secret.into(), server_public };
 
     let mut cmd = [0u8; 1];
     client.read_exact(&mut cmd).unwrap();
@@ -429,6 +433,12 @@ fn start_rtsp_task(
       "Client didnt send start opcode after set param. Expected 1, got {}",
       cmd[0]
     );
+
+    let data = EncryptionData {
+      shared_secret: shared_secret.into(),
+      server_public,
+      socket: client,
+    };
 
     tx.send(data).expect("Only sent once");
 
@@ -526,8 +536,6 @@ cfg_if::cfg_if! {
 }
 
 fn run() -> Result<(), error::CliError> {
-  let mut cli = parse_cli()?;
-
   let (tx, rx) = std::sync::mpsc::sync_channel(1);
   let thread = start_rtsp_task(tx);
 
@@ -535,6 +543,9 @@ fn run() -> Result<(), error::CliError> {
   thread.join().unwrap().expect("Networking task failed");
 
   println!("Main got server pub {:?}", data.server_public);
+
+  let output: Box<dyn std::io::Write + Send> = Box::new(data.socket);
+  let mut cli = parse_cli(Some(output))?;
 
   // Maximum frame size by specification + maximum y4m header
   let limit = y4m::Limits {

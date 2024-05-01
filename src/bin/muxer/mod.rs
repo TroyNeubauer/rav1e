@@ -34,7 +34,12 @@ pub trait Muxer: Send {
 
 pub fn create_muxer<P: AsRef<Path>>(
   path: P, overwrite: bool,
+  output_override: Option<Box<dyn std::io::Write + Send>>,
 ) -> Result<Box<dyn Muxer + Send>, CliError> {
+  if let Some(out) = output_override {
+    return Ok(IvfMuxer::new(out));
+  }
+
   if !overwrite {
     IvfMuxer::check_file(path.as_ref())?;
   }

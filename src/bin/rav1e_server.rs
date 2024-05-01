@@ -99,7 +99,6 @@ use chacha20::ChaCha20;
 use rav1e::config::CpuFeatureLevel;
 use rav1e::prelude::*;
 use rav1e::steg::Hic;
-use x25519_dalek::StaticSecret;
 use x25519_dalek::{EphemeralSecret, PublicKey, SharedSecret};
 
 use crate::decoder::{Decoder, FrameBuilder, VideoDetails};
@@ -404,6 +403,8 @@ fn start_rtsp_task(
       "Client didnt send set param opcode. Expected 0, got {}",
       cmd[0]
     );
+    println!("Received set param reaquest");
+
     let mut param_length = [0u8; 2];
     client.read_exact(&mut param_length).unwrap();
     let param_length = u16::from_le_bytes(param_length);
@@ -411,16 +412,13 @@ fn start_rtsp_task(
     let mut param = vec![0u8; param_length as usize];
     client.read_exact(&mut param).unwrap();
 
-    println!("Got param: {param:02X?}");
     assert!(param.len() >= 32, "Set param must be at least 32 bytes");
     let mut client_public = [0u8; 32];
     client_public.copy_from_slice(&param[..32]);
+    let client_public = PublicKey::from(client_public);
+    println!("Got client pubkey: {client_public:02X?}");
 
-    let client_secret = StaticSecret::from([0u8; 32]);
-    let client_public = PublicKey::from(&client_secret);
-
-    //let server_secret = EphemeralSecret::random();
-    let server_secret = StaticSecret::from([0u8; 32]);
+    let server_secret = EphemeralSecret::random();
     let server_public = PublicKey::from(&server_secret);
 
     let shared_secret = server_secret.diffie_hellman(&client_public);
@@ -545,7 +543,7 @@ fn run() -> Result<(), error::CliError> {
   println!("Main got server pub {:02X?}", data.server_public);
 
   let output: Box<dyn std::io::Write + Send> = Box::new(data.socket);
-  let mut cli = if true { parse_cli(None)? } else { parse_cli(Some(output))? };
+  let mut cli = parse_cli(Some(output))?;
 
   // Maximum frame size by specification + maximum y4m header
   let limit = y4m::Limits {

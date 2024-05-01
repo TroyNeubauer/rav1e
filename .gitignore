@@ -7,3 +7,5 @@ target/
 secret_key
 .vscode/
 .idea/
+
+data

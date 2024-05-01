@@ -13,7 +13,7 @@ use rayon::{ThreadPool, ThreadPoolBuilder};
 use std::sync::Arc;
 
 use crate::api::{ChromaSampling, Context, ContextInner, PixelRange};
-use crate::steg::HiddenInformationContainer;
+use crate::steg::Hic;
 use crate::util::Pixel;
 
 mod encoder;
@@ -214,7 +214,7 @@ fn check_tile_log2(n: usize) -> bool {
 
 impl Config {
   pub(crate) fn new_inner<'a, T: Pixel>(
-    &self, hic: &'a mut HiddenInformationContainer,
+    &self, hic: &'a mut Hic,
   ) -> Result<ContextInner<'a, T>, InvalidConfig> {
     assert!(
       8 * std::mem::size_of::<T>() >= self.enc.bit_depth,
@@ -291,7 +291,7 @@ impl Config {
   ///
   /// [`Context`]: struct.Context.html
   pub fn new_context<'a, T: Pixel>(
-    &self, hic: &'a mut HiddenInformationContainer,
+    &self, hic: &'a mut Hic,
   ) -> Result<Context<'a, T>, InvalidConfig> {
     let inner = self.new_inner(hic)?;
     let config = (*inner.config).clone();

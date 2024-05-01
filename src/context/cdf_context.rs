@@ -7,7 +7,7 @@
 // Media Patent License 1.0 was not distributed with this source code in the
 // PATENTS file, you can obtain it at www.aomedia.org/license/patent.
 
-use crate::steg::HiddenInformationContainer;
+use crate::steg::Hic;
 
 use super::*;
 use std::marker::PhantomData;
@@ -696,14 +696,14 @@ pub struct ContextWriter<'a> {
   pub fc_log: CDFContextLog,
   #[cfg(feature = "desync_finder")]
   pub fc_map: Option<FieldMap>, // For debugging purposes
-  pub hidden_info_container: &'a mut HiddenInformationContainer,
+  pub hidden_info_container: &'a mut Hic,
 }
 
 impl<'a> ContextWriter<'a> {
   #[allow(clippy::let_and_return)]
   pub fn new(
     fc: &'a mut CDFContext, bc: BlockContext<'a>,
-    hidden_info_container: &'a mut HiddenInformationContainer,
+    hidden_info_container: &'a mut Hic,
   ) -> Self {
     let fc_log = CDFContextLog::default();
     #[allow(unused_mut)]

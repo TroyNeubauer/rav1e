@@ -25,7 +25,7 @@ use crate::rate::{
 };
 use crate::scenechange::SceneChangeDetector;
 use crate::stats::EncoderStats;
-use crate::steg::HiddenInformationContainer;
+use crate::steg::Hic;
 use crate::tiling::Area;
 use crate::util::Pixel;
 use arrayvec::ArrayVec;
@@ -261,12 +261,12 @@ pub(crate) struct ContextInner<'a, T: Pixel> {
   /// Optional T35 metadata per frame
   t35_q: BTreeMap<u64, Box<[T35]>>,
 
-  pub(crate) hic: &'a mut HiddenInformationContainer,
+  pub(crate) hic: &'a mut Hic,
 }
 
 impl<'a, T: Pixel> ContextInner<'a, T> {
   pub fn new(
-    enc: &EncoderConfig, hic: &'a mut HiddenInformationContainer,
+    enc: &EncoderConfig, hic: &'a mut Hic,
   ) -> Self {
     // initialize with temporal delimiter
     let packet_data = TEMPORAL_DELIMITER.to_vec();

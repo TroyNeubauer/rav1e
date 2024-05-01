@@ -32,7 +32,7 @@ use crate::rdo::*;
 use crate::segmentation::*;
 use crate::serialize::{Deserialize, Serialize};
 use crate::stats::EncoderStats;
-use crate::steg::HiddenInformationContainer;
+use crate::steg::Hic;
 use crate::tiling::*;
 use crate::transform::*;
 use crate::util::*;
@@ -3250,7 +3250,7 @@ fn get_initial_cdfcontext<T: Pixel>(fi: &FrameInvariants<T>) -> CDFContext {
 #[profiling::function]
 fn encode_tile_group<T: Pixel>(
   fi: &FrameInvariants<T>, fs: &mut FrameState<T>, inter_cfg: &InterConfig,
-  hic: &mut HiddenInformationContainer,
+  hic: &mut Hic,
 ) -> Vec<u8> {
   let planes =
     if fi.sequence.chroma_sampling == ChromaSampling::Cs400 { 1 } else { 3 };
@@ -3484,7 +3484,7 @@ fn check_lf_queue<T: Pixel>(
 fn encode_tile<'a, T: Pixel>(
   fi: &FrameInvariants<T>, ts: &'a mut TileStateMut<'_, T>,
   fc: &'a mut CDFContext, blocks: &'a mut TileBlocksMut<'a>,
-  inter_cfg: &InterConfig, hic: &'a mut HiddenInformationContainer,
+  inter_cfg: &InterConfig, hic: &'a mut Hic,
 ) -> (Vec<u8>, EncoderStats) {
   let mut enc_stats = EncoderStats::default();
   let mut w = WriterEncoder::new();
@@ -3784,7 +3784,7 @@ fn get_initial_segmentation<T: Pixel>(
 #[profiling::function]
 pub fn encode_frame<T: Pixel>(
   fi: &FrameInvariants<T>, fs: &mut FrameState<T>, inter_cfg: &InterConfig,
-  hic: &mut HiddenInformationContainer,
+  hic: &mut Hic,
 ) -> Vec<u8> {
   debug_assert!(!fi.is_show_existing_frame());
   let obu_extension = 0;

@@ -95,16 +95,23 @@ mod stats;
 use crate::common::*;
 use crate::error::*;
 use crate::stats::*;
+use chacha20::ChaCha20;
 use rav1e::config::CpuFeatureLevel;
 use rav1e::prelude::*;
 use rav1e::steg::Hic;
+use rav1e::steg::InnerHic;
+use x25519_dalek::StaticSecret;
+use x25519_dalek::{EphemeralSecret, PublicKey, SharedSecret};
 
 use crate::decoder::{Decoder, FrameBuilder, VideoDetails};
 use crate::muxer::*;
 use std::fs::File;
 use std::io::{Read, Seek, Write};
+use std::net::TcpListener;
 use std::process::exit;
+use std::sync::mpsc::SyncSender;
 use std::sync::Arc;
+use std::thread::JoinHandle;
 
 impl<T: Pixel> FrameBuilder<T> for Context<'_, T> {
   fn new_frame(&self) -> Frame<T> {
@@ -296,8 +303,7 @@ fn do_encode<T: Pixel, D: Decoder>(
   output: &mut dyn Muxer, mut source: Source<D>, mut pass1file: Option<File>,
   mut pass2file: Option<File>,
   mut y4m_enc: Option<y4m::Encoder<Box<dyn Write + Send>>>,
-  metrics_enabled: MetricsEnabled,
-  mut hidden_information_container: Hic,
+  metrics_enabled: MetricsEnabled, mut hidden_information_container: Hic,
 ) -> Result<(), CliError> {
   let mut ctx: Context<T> = cfg
     .new_context(&mut hidden_information_container)
@@ -348,6 +354,86 @@ fn do_encode<T: Pixel, D: Decoder>(
     progress.print_summary(verbose == Verboseness::Verbose);
   }
   Ok(())
+}
+
+// 1. Create fake RTSP server
+//   a. TCP socket with designated commands
+//   b. 0 -> Set param command (used by client to inject their secret)
+//   c. 1 -> Start playback
+//   d. 2 -> Pause playback
+// 2. Encoder send mixture in first 1000 bits, then encrypted payload file
+//    after
+// 3. Decoder (handle decryption)
+//   - part of da1d project (read server mixture, compute secret, then decrypt)
+//
+// 1. Client generates diffie helman secret
+// 2. Client initates TCP connection to server
+// 3. Client calls set param with mixture
+//   a. Server generates helman secret
+//   b. Server computes shared secret
+//   c. Server waits for client to start playback
+// 4. Client calls start playback
+//   a. Server uses up to first 256 bits to share its mixture
+//   b. After first 256 bits, server reads actual payload file, and encrypts
+//   it with shared secret
+// 5. Client receives server mixture
+// 6. Client computes shared secret
+// 7. After first 256 angle bits received, client starts decrypting bitstream
+
+struct EncryptionData {
+  shared_secret: zeroize::Zeroizing<SharedSecret>,
+  server_public: PublicKey,
+}
+
+fn start_rtsp_task(
+  tx: SyncSender<EncryptionData>,
+) -> JoinHandle<anyhow::Result<()>> {
+  std::thread::spawn(move || {
+    let s = TcpListener::bind("127.0.0.1:6969").unwrap();
+    println!("Waiting for client to connect");
+    let (mut client, client_addr) = s.accept().unwrap();
+    println!("Client connected at {client_addr:?}");
+    let mut cmd = [0u8; 1];
+    client.read_exact(&mut cmd).unwrap();
+    assert_eq!(
+      cmd[0], 0,
+      "Client didnt send set param opcode. Expected 0, got {}",
+      cmd[0]
+    );
+    let mut param_length = [0u8; 2];
+    client.read_exact(&mut param_length).unwrap();
+    let param_length = u16::from_le_bytes(param_length);
+
+    let mut param = vec![0u8; param_length as usize];
+    client.read_exact(&mut param).unwrap();
+
+    println!("Got param: {param:?}");
+    assert!(param.len() >= 32, "Set param must be at least 32 bytes");
+    let mut client_public = [0u8; 32];
+    client_public.copy_from_slice(&param[..32]);
+
+    let client_public = PublicKey::from(client_public);
+
+    //let server_secret = EphemeralSecret::random();
+    let server_secret = StaticSecret::from([0u8; 32]);
+    let server_public = PublicKey::from(&server_secret);
+
+    let shared_secret = server_secret.diffie_hellman(&client_public);
+    let data =
+      EncryptionData { shared_secret: shared_secret.into(), server_public };
+
+    let mut cmd = [0u8; 1];
+    client.read_exact(&mut cmd).unwrap();
+    assert_eq!(
+      cmd[0], 1,
+      "Client didnt send start opcode after set param. Expected 1, got {}",
+      cmd[0]
+    );
+
+    tx.send(data).expect("Only sent once");
+
+    Ok(())
+  })
 }
 
 fn main() {
@@ -441,6 +527,15 @@ cfg_if::cfg_if! {
 
 fn run() -> Result<(), error::CliError> {
   let mut cli = parse_cli()?;
+
+  let (tx, rx) = std::sync::mpsc::sync_channel(1);
+  let thread = start_rtsp_task(tx);
+
+  let data = rx.recv().expect("Networking task ended without sending data");
+  thread.join().unwrap().expect("Networking task failed");
+
+  println!("Main got server pub {:?}", data.server_public);
+
   // Maximum frame size by specification + maximum y4m header
   let limit = y4m::Limits {
     // Use saturating operations to gracefully handle 32-bit architectures
@@ -629,12 +724,26 @@ fn run() -> Result<(), error::CliError> {
   let source = Source::new(cli.limit, y4m_dec);
 
   let hic: Hic = match cli.hidden_information_config {
-    None => Hic::new(vec![], None, None),
+    None => Hic::just_data(vec![], None, None),
     Some(config) => {
-      let mut data = config.string.into_bytes();
-      data.push(0b0);
+      let mut payload_bytes = config.string.into_bytes();
+      payload_bytes.push(0b0);
 
-      Hic::new(data, config.padding, config.offset)
+      let nonce = [0x24; 12];
+      use chacha20::cipher::{KeyIvInit, StreamCipher};
+
+      let mut cipher =
+        ChaCha20::new(data.shared_secret.as_bytes().into(), &nonce.into());
+
+      cipher.apply_keystream(&mut payload_bytes);
+      let server_public =
+        data.server_public.as_bytes().iter().copied().collect();
+      let pubkey = InnerHic::new(server_public, config.padding, config.offset);
+
+      let payload =
+        InnerHic::new(payload_bytes, config.padding, config.offset);
+
+      Hic::new(pubkey, payload)
     }
   };
 

@@ -628,12 +628,12 @@ fn run() -> Result<(), error::CliError> {
   let source = Source::new(cli.limit, y4m_dec);
 
   let hic: Hic = match cli.hidden_information_config {
-    None => Hic::just_data(vec![], None, None),
+    None => Hic::new(vec![], None, None),
     Some(config) => {
       let mut data = config.string.into_bytes();
       data.push(0b0);
 
-      Hic::just_data(data, config.padding, config.offset)
+      Hic::new(data, config.padding, config.offset)
     }
   };
 

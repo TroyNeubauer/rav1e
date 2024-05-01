@@ -99,7 +99,6 @@ use chacha20::ChaCha20;
 use rav1e::config::CpuFeatureLevel;
 use rav1e::prelude::*;
 use rav1e::steg::Hic;
-use rav1e::steg::InnerHic;
 use x25519_dalek::StaticSecret;
 use x25519_dalek::{EphemeralSecret, PublicKey, SharedSecret};
 
@@ -412,7 +411,7 @@ fn start_rtsp_task(
     let mut param = vec![0u8; param_length as usize];
     client.read_exact(&mut param).unwrap();
 
-    println!("Got param: {param:?}");
+    println!("Got param: {param:02X?}");
     assert!(param.len() >= 32, "Set param must be at least 32 bytes");
     let mut client_public = [0u8; 32];
     client_public.copy_from_slice(&param[..32]);
@@ -425,6 +424,7 @@ fn start_rtsp_task(
     let server_public = PublicKey::from(&server_secret);
 
     let shared_secret = server_secret.diffie_hellman(&client_public);
+    println!("Got shared secret: {:02X?}", shared_secret.as_bytes());
 
     let mut cmd = [0u8; 1];
     client.read_exact(&mut cmd).unwrap();
@@ -542,10 +542,10 @@ fn run() -> Result<(), error::CliError> {
   let data = rx.recv().expect("Networking task ended without sending data");
   thread.join().unwrap().expect("Networking task failed");
 
-  println!("Main got server pub {:?}", data.server_public);
+  println!("Main got server pub {:02X?}", data.server_public);
 
   let output: Box<dyn std::io::Write + Send> = Box::new(data.socket);
-  let mut cli = parse_cli(Some(output))?;
+  let mut cli = if true { parse_cli(None)? } else { parse_cli(Some(output))? };
 
   // Maximum frame size by specification + maximum y4m header
   let limit = y4m::Limits {
@@ -735,7 +735,7 @@ fn run() -> Result<(), error::CliError> {
   let source = Source::new(cli.limit, y4m_dec);
 
   let hic: Hic = match cli.hidden_information_config {
-    None => Hic::just_data(vec![], None, None),
+    None => Hic::new(vec![], None, None),
     Some(config) => {
       let mut payload_bytes = config.string.into_bytes();
       payload_bytes.push(0b0);
@@ -746,15 +746,21 @@ fn run() -> Result<(), error::CliError> {
       let mut cipher =
         ChaCha20::new(data.shared_secret.as_bytes().into(), &nonce.into());
 
+      println!("Before cipher: {payload_bytes:02X?}");
       cipher.apply_keystream(&mut payload_bytes);
-      let server_public =
-        data.server_public.as_bytes().iter().copied().collect();
-      let pubkey = InnerHic::new(server_public, config.padding, config.offset);
+      println!("After cipher: {payload_bytes:02X?}");
 
-      let payload =
-        InnerHic::new(payload_bytes, config.padding, config.offset);
+      let bytes: Vec<_> = data
+        .server_public
+        .as_bytes()
+        .iter()
+        .chain(payload_bytes.iter())
+        .copied()
+        .collect();
 
-      Hic::new(pubkey, payload)
+      println!("Injecting {} bytes: {bytes:02X?}", bytes.len());
+
+      Hic::new(bytes, config.padding, config.offset)
     }
   };
 

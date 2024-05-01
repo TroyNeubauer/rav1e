@@ -1,89 +1,6 @@
 static DEFAULT_PADDING: usize = 0;
 
 pub struct Hic {
-  on_pubkey: bool,
-  pubkey: InnerHic,
-  payload: InnerHic,
-}
-
-impl Hic {
-  pub fn new(pubkey: InnerHic, payload: InnerHic) -> Self {
-    Self { on_pubkey: true, pubkey, payload }
-  }
-
-  pub fn just_data(
-    data: Vec<u8>, steps_to_skip: Option<usize>, offset: Option<usize>,
-  ) -> Self {
-    Self {
-      on_pubkey: false,
-      pubkey: InnerHic::new(vec![], None, None),
-      payload: InnerHic::new(data, steps_to_skip, offset),
-    }
-  }
-
-  pub fn start_pre_encoding(&mut self) {
-    if self.pubkey.is_done() && self.on_pubkey {
-      self.on_pubkey = false;
-      println!("Switching to data!");
-    }
-
-    if self.on_pubkey {
-      self.pubkey.start_pre_encoding();
-    } else {
-      self.payload.start_pre_encoding();
-    }
-  }
-
-  pub fn stop_pre_encoding(&mut self) {
-    if self.on_pubkey {
-      self.pubkey.stop_pre_encoding();
-    } else {
-      self.payload.stop_pre_encoding();
-    }
-  }
-
-  pub fn start_final_encoding(&mut self) {
-    if self.on_pubkey {
-      self.pubkey.start_final_encoding();
-    } else {
-      self.payload.start_final_encoding();
-    }
-  }
-
-  pub fn stop_final_encoding(&mut self) {
-    if self.on_pubkey {
-      self.pubkey.stop_final_encoding();
-    } else {
-      self.payload.stop_final_encoding();
-    }
-  }
-
-  pub fn is_enabled(&self) -> bool {
-    if self.on_pubkey {
-      self.pubkey.is_enabled()
-    } else {
-      self.payload.is_enabled()
-    }
-  }
-
-  pub fn is_done(&self) -> bool {
-    if self.on_pubkey {
-      self.pubkey.is_done()
-    } else {
-      self.payload.is_done()
-    }
-  }
-
-  pub fn inject_in_angle(&mut self, angle: u32) -> u32 {
-    if self.on_pubkey {
-      self.pubkey.inject_in_angle(angle)
-    } else {
-      self.payload.inject_in_angle(angle)
-    }
-  }
-}
-
-pub struct InnerHic {
   pub data: Vec<u8>,
 
   pre_encoding: bool,
@@ -103,11 +20,11 @@ pub struct InnerHic {
   offset: usize,
 }
 
-impl InnerHic {
+impl Hic {
   pub fn new(
     data: Vec<u8>, steps_to_skip: Option<usize>, offset: Option<usize>,
   ) -> Self {
-    InnerHic {
+    Self {
       data,
 
       pre_encoding: false,
